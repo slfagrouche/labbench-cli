@@ -1,0 +1,11 @@
+flowchart TD
+    S[Tool Call] --> PM{permission_mode}
+    PM -->|accept-all| ALLOW1[Allow]
+    PM -->|manual| ASK1[Ask User]
+    PM -->|auto| TT{Tool Type}
+    TT -->|Read/Glob/Grep/Web*/safe Bash| ALLOW2[Allow]
+    TT -->|Write/Edit/unsafe Bash| ASK2[Ask User]
+    ASK1 --> D{Approved?}
+    ASK2 --> D
+    D -->|Yes| EX[Execute]
+    D -->|No| DENY[Deny]
