@@ -97,3 +97,125 @@ def get_memory_context(include_guidance: bool = False) -> str:
         return ""
 
     body = "\n\n".join(parts)
+    if include_guidance:
+        return f"{MEMORY_SYSTEM_PROMPT}\n\n## MEMORY.md\n{body}"
+    return body
+
+
+# ── Relevant memory finder ─────────────────────────────────────────────────
+
+def find_relevant_memories(
+    query: str,
+    max_results: int = 5,
+    use_ai: bool = False,
+    config: dict | None = None,
+) -> list[dict]:
+    """Find memories relevant to a query.
+
+    Strategy:
+      1. Always: keyword match on name + description + content
+      2. If use_ai=True and config has a model: use a small AI call to rank
+
+    Returns:
+        List of dicts with keys: name, description, type, scope, content,
+        file_path, mtime_s, freshness_text
+    """
+    # Step 1: Keyword filter
+    keyword_results = search_memory(query)
+    if not keyword_results:
+        return []
+
+    if not use_ai or not config:
+        # Return top max_results by recency (newest first)
+        from .scan import scan_all_memories
+        headers = scan_all_memories()
+        path_to_mtime = {h.file_path: h.mtime_s for h in headers}
+
+        results = []
+        for entry in keyword_results[:max_results]:
+            mtime_s = path_to_mtime.get(entry.file_path, 0)
+            results.append({
+                "name": entry.name,
+                "description": entry.description,
+                "type": entry.type,
+                "scope": entry.scope,
+                "content": entry.content,
+                "file_path": entry.file_path,
+                "mtime_s": mtime_s,
+                "freshness_text": memory_freshness_text(mtime_s),
+            })
+        results.sort(key=lambda r: r["mtime_s"], reverse=True)
+        return results[:max_results]
+
+    # Step 2: AI-powered relevance selection (optional, lightweight)
+    return _ai_select_memories(query, keyword_results, max_results, config)
+
+
+def _ai_select_memories(
+    query: str,
+    candidates: list,
+    max_results: int,
+    config: dict,
+) -> list[dict]:
+    """Use a fast AI call to select the most relevant memories from candidates.
+
+    Falls back to keyword results on any error.
+    """
+    try:
+        from providers import stream, AssistantTurn
+        from .scan import scan_all_memories
+
+        headers = scan_all_memories()
+        path_to_mtime = {h.file_path: h.mtime_s for h in headers}
+
+        # Build manifest of candidates only
+        manifest_lines = []
+        for i, e in enumerate(candidates):
+            manifest_lines.append(f"{i}: [{e.type}] {e.name} — {e.description}")
+        manifest = "\n".join(manifest_lines)
+
+        system = (
+            "You select memories relevant to a query. "
+            "Return a JSON object with key 'indices' containing a list of integer indices "
+            f"(0-based) from the provided list. Select at most {max_results} entries. "
+            "Only include indices clearly relevant to the query. Return {\"indices\": []} if none."
+        )
+        messages = [{"role": "user", "content": f"Query: {query}\n\nMemories:\n{manifest}"}]
+
+        result_text = ""
+        for event in stream(
+            model=config.get("model", "claude-haiku-4-5-20251001"),
+            system=system,
+            messages=messages,
+            tool_schemas=[],
+            config={**config, "max_tokens": 256, "no_tools": True},
+        ):
+            if isinstance(event, AssistantTurn):
+                result_text = event.text
+                break
+
+        import json as _json
+        parsed = _json.loads(result_text)
+        selected_indices = [int(i) for i in parsed.get("indices", []) if isinstance(i, int)]
+
+    except Exception:
+        # Fall back to keyword results
+        selected_indices = list(range(min(max_results, len(candidates))))
+
+    results = []
+    for i in selected_indices[:max_results]:
+        if i < 0 or i >= len(candidates):
+            continue
+        entry = candidates[i]
+        mtime_s = path_to_mtime.get(entry.file_path, 0) if "path_to_mtime" in dir() else 0
+        results.append({
+            "name": entry.name,
+            "description": entry.description,
+            "type": entry.type,
+            "scope": entry.scope,
+            "content": entry.content,
+            "file_path": entry.file_path,
+            "mtime_s": mtime_s,
+            "freshness_text": memory_freshness_text(mtime_s),
+        })
+    return results
