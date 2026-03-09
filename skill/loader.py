@@ -84,3 +84,110 @@ def _parse_skill_file(path: Path, source: str = "user") -> Optional[SkillDef]:
                 return v
         return ""
 
+    name = _f("name")
+    if not name:
+        return None
+
+    # allowed-tools wins over tools if present
+    tools_raw = _f("allowed-tools", "tools")
+    tools = _parse_list_field(tools_raw) if tools_raw else []
+
+    triggers_raw = _f("triggers")
+    triggers = _parse_list_field(triggers_raw) if triggers_raw else [f"/{name}"]
+
+    arguments_raw = _f("arguments")
+    arguments = _parse_list_field(arguments_raw) if arguments_raw else []
+
+    user_invocable_raw = _f("user-invocable", "user_invocable") or "true"
+    user_invocable = user_invocable_raw.lower() not in ("false", "0", "no")
+
+    context = _f("context") or "inline"
+    context = context.lower()
+    if context not in ("inline", "fork"):
+        context = "inline"
+
+    return SkillDef(
+        name=name,
+        description=_f("description"),
+        triggers=triggers,
+        tools=tools,
+        prompt=prompt,
+        file_path=str(path),
+        when_to_use=_f("when_to_use", "when-to-use"),
+        argument_hint=_f("argument-hint", "argument_hint"),
+        arguments=arguments,
+        model=_f("model"),
+        user_invocable=user_invocable,
+        context=context,
+        source=source,
+    )
+
+
+# ── Registry of built-in skills (registered by builtin.py) ────────────────
+
+_BUILTIN_SKILLS: list[SkillDef] = []
+
+
+def register_builtin_skill(skill: SkillDef) -> None:
+    _BUILTIN_SKILLS.append(skill)
+
+
+# ── Load all skills ────────────────────────────────────────────────────────
+
+def load_skills(include_builtins: bool = True) -> list[SkillDef]:
+    """Return skills from disk + builtins, deduplicated (project > user > builtin)."""
+    seen: dict[str, SkillDef] = {}
+
+    # Builtins go in first (lowest priority)
+    if include_builtins:
+        for sk in _BUILTIN_SKILLS:
+            seen[sk.name] = sk
+
+    # User-level next, project-level last (highest priority)
+    skill_paths = _get_skill_paths()
+    for i, skill_dir in enumerate(reversed(skill_paths)):
+        src = "user" if i == 0 else "project"
+        if not skill_dir.is_dir():
+            continue
+        for md_file in sorted(skill_dir.glob("*.md")):
+            skill = _parse_skill_file(md_file, source=src)
+            if skill:
+                seen[skill.name] = skill
+
+    return list(seen.values())
+
+
+def find_skill(query: str) -> Optional[SkillDef]:
+    """Find a skill whose trigger matches the first word (or whole string) of query."""
+    query = query.strip()
+    if not query:
+        return None
+
+    first_word = query.split()[0]
+    for skill in load_skills():
+        for trigger in skill.triggers:
+            if first_word == trigger:
+                return skill
+            if trigger.startswith(first_word + " "):
+                return skill
+    return None
+
+
+# ── Argument substitution ─────────────────────────────────────────────────
+
+def substitute_arguments(prompt: str, args: str, arg_names: list[str]) -> str:
+    """Replace $ARGUMENTS (whole args string) and $ARG_NAME placeholders.
+
+    Named args are positional: first word → first name, etc.
+    """
+    # Always substitute $ARGUMENTS
+    result = prompt.replace("$ARGUMENTS", args)
+
+    # Named args: split by whitespace
+    arg_values = args.split()
+    for i, arg_name in enumerate(arg_names):
+        placeholder = f"${arg_name.upper()}"
+        value = arg_values[i] if i < len(arg_values) else ""
+        result = result.replace(placeholder, value)
+
+    return result
