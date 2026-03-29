@@ -82,3 +82,106 @@ class TestGetContextLimit:
 
     def test_qwen(self):
         assert get_context_limit("qwen-max") == 1000000
+
+    def test_unknown_model_fallback(self):
+        # Unknown models fall back to openai provider which has 128000
+        assert get_context_limit("some-random-model-xyz") == 128000
+
+    def test_explicit_provider_prefix(self):
+        assert get_context_limit("ollama/llama3.3") == 128000
+
+
+# ── snip_old_tool_results ─────────────────────────────────────────────────
+
+class TestSnipOldToolResults:
+    def test_old_tool_results_get_truncated(self):
+        long_content = "A" * 5000
+        msgs = [
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": "let me check", "tool_calls": []},
+            {"role": "tool", "tool_call_id": "t1", "name": "Read", "content": long_content},
+            {"role": "user", "content": "thanks"},
+            {"role": "assistant", "content": "you're welcome"},
+            {"role": "user", "content": "bye"},
+            {"role": "assistant", "content": "goodbye"},
+            {"role": "user", "content": "wait"},
+            {"role": "assistant", "content": "yes?"},
+            {"role": "user", "content": "never mind"},
+        ]
+        result = snip_old_tool_results(msgs, max_chars=2000, preserve_last_n_turns=6)
+        assert result is msgs  # mutated in place
+        tool_msg = msgs[2]
+        assert len(tool_msg["content"]) < 5000
+        assert "snipped" in tool_msg["content"]
+
+    def test_recent_tool_results_preserved(self):
+        long_content = "B" * 5000
+        msgs = [
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": "ok", "tool_calls": []},
+            {"role": "tool", "tool_call_id": "t1", "name": "Read", "content": long_content},
+        ]
+        # All 3 messages are within preserve_last_n_turns=6
+        result = snip_old_tool_results(msgs, max_chars=2000, preserve_last_n_turns=6)
+        assert msgs[2]["content"] == long_content  # not truncated
+
+    def test_short_tool_results_not_touched(self):
+        msgs = [
+            {"role": "tool", "tool_call_id": "t1", "name": "Bash", "content": "short"},
+            {"role": "user", "content": "a"},
+            {"role": "user", "content": "b"},
+            {"role": "user", "content": "c"},
+            {"role": "user", "content": "d"},
+            {"role": "user", "content": "e"},
+            {"role": "user", "content": "f"},
+        ]
+        snip_old_tool_results(msgs, max_chars=2000, preserve_last_n_turns=6)
+        assert msgs[0]["content"] == "short"
+
+    def test_non_tool_messages_untouched(self):
+        msgs = [
+            {"role": "user", "content": "X" * 5000},
+            {"role": "user", "content": "a"},
+            {"role": "user", "content": "b"},
+            {"role": "user", "content": "c"},
+            {"role": "user", "content": "d"},
+            {"role": "user", "content": "e"},
+            {"role": "user", "content": "f"},
+        ]
+        snip_old_tool_results(msgs, max_chars=2000, preserve_last_n_turns=6)
+        assert msgs[0]["content"] == "X" * 5000
+
+
+# ── find_split_point ──────────────────────────────────────────────────────
+
+class TestFindSplitPoint:
+    def test_returns_reasonable_index(self):
+        msgs = [
+            {"role": "user", "content": "A" * 1000},
+            {"role": "assistant", "content": "B" * 1000},
+            {"role": "user", "content": "C" * 1000},
+            {"role": "assistant", "content": "D" * 1000},
+            {"role": "user", "content": "E" * 1000},
+        ]
+        idx = find_split_point(msgs, keep_ratio=0.3)
+        # With equal-size messages and keep_ratio=0.3, split should be around index 3-4
+        assert 2 <= idx <= 4
+
+    def test_single_message(self):
+        msgs = [{"role": "user", "content": "hello"}]
+        idx = find_split_point(msgs, keep_ratio=0.3)
+        assert idx == 0
+
+    def test_empty_messages(self):
+        idx = find_split_point([], keep_ratio=0.3)
+        assert idx == 0
+
+    def test_split_preserves_recent(self):
+        # Recent portion should contain ~30% of tokens
+        msgs = [{"role": "user", "content": "X" * 100} for _ in range(10)]
+        idx = find_split_point(msgs, keep_ratio=0.3)
+        total = estimate_tokens(msgs)
+        recent = estimate_tokens(msgs[idx:])
+        # Recent should be roughly 30% of total (allow some tolerance)
+        assert recent >= total * 0.2
+        assert recent <= total * 0.5
