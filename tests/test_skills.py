@@ -108,3 +108,138 @@ def test_parse_skill_file_no_name(tmp_path):
     no_name = tmp_path / "noname.md"
     no_name.write_text("---\ndescription: test\n---\nbody\n", encoding="utf-8")
     assert _parse_skill_file(no_name) is None
+
+
+def test_parse_skill_file_context_fork(tmp_path):
+    fork_md = tmp_path / "fork.md"
+    fork_md.write_text("---\nname: fork-task\ndescription: test\ncontext: fork\n---\nbody\n")
+    skill = _parse_skill_file(fork_md)
+    assert skill is not None
+    assert skill.context == "fork"
+
+
+def test_parse_skill_file_allowed_tools(tmp_path):
+    md = tmp_path / "t.md"
+    md.write_text("---\nname: myskill\ndescription: d\nallowed-tools: [Bash, Read]\n---\nbody\n")
+    skill = _parse_skill_file(md)
+    assert skill is not None
+    assert "Bash" in skill.tools
+    assert "Read" in skill.tools
+
+
+def test_parse_skill_file_when_to_use_kebab(tmp_path):
+    md = tmp_path / "k.md"
+    md.write_text(
+        "---\nname: kskill\ndescription: d\nwhen-to-use: when testing kebab keys\n---\nbody\n"
+    )
+    skill = _parse_skill_file(md)
+    assert skill is not None
+    assert "kebab" in skill.when_to_use
+
+
+# ------------------------------------------------------------------
+# load_skills
+# ------------------------------------------------------------------
+
+def test_load_skills(skill_dir):
+    skills = load_skills()
+    assert len(skills) == 2
+    names = {s.name for s in skills}
+    assert names == {"commit", "review"}
+
+
+def test_load_skills_empty_dir(tmp_path, monkeypatch):
+    empty = tmp_path / "empty_skills"
+    empty.mkdir()
+    monkeypatch.setattr(_loader, "_get_skill_paths", lambda: [empty])
+    monkeypatch.setattr(_loader, "_BUILTIN_SKILLS", [])
+    assert load_skills() == []
+
+
+def test_load_skills_nonexistent_dir(tmp_path, monkeypatch):
+    monkeypatch.setattr(_loader, "_get_skill_paths", lambda: [tmp_path / "does_not_exist"])
+    monkeypatch.setattr(_loader, "_BUILTIN_SKILLS", [])
+    assert load_skills() == []
+
+
+def test_load_skills_builtins_present(monkeypatch):
+    """Without patching, built-in skills should be present."""
+    monkeypatch.setattr(_loader, "_get_skill_paths", lambda: [])
+    skills = load_skills()
+    names = {s.name for s in skills}
+    assert "commit" in names
+    assert "review" in names
+    assert "eda" in names
+
+
+def test_load_skills_project_overrides_builtin(tmp_path, monkeypatch):
+    """A project skill with the same name overrides the builtin."""
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    # project-level "commit" with different description
+    (skills_dir / "commit.md").write_text(
+        "---\nname: commit\ndescription: OVERRIDDEN\n---\ncustom commit prompt\n"
+    )
+    monkeypatch.setattr(_loader, "_get_skill_paths", lambda: [skills_dir])
+    skills = load_skills()
+    commit = next(s for s in skills if s.name == "commit")
+    assert commit.description == "OVERRIDDEN"
+
+
+# ------------------------------------------------------------------
+# find_skill
+# ------------------------------------------------------------------
+
+def test_find_skill_commit(skill_dir):
+    skill = find_skill("/commit")
+    assert skill is not None
+    assert skill.name == "commit"
+
+
+def test_find_skill_review(skill_dir):
+    skill = find_skill("/review")
+    assert skill is not None
+    assert skill.name == "review"
+
+
+def test_find_skill_review_pr(skill_dir):
+    skill = find_skill("/review-pr some-pr-url")
+    assert skill is not None
+    assert skill.name == "review"
+
+
+def test_find_skill_nonexistent(skill_dir):
+    result = find_skill("/nonexistent")
+    assert result is None
+
+
+# ------------------------------------------------------------------
+# substitute_arguments
+# ------------------------------------------------------------------
+
+def test_substitute_arguments_placeholder():
+    result = substitute_arguments("Deploy $ARGUMENTS please", "v1.2 prod", [])
+    assert result == "Deploy v1.2 prod please"
+
+
+def test_substitute_named_args(tmp_path):
+    result = substitute_arguments(
+        "Deploy $VERSION to $ENV. Full args: $ARGUMENTS",
+        "1.0 staging",
+        ["env", "version"],
+    )
+    # arg_names are positional: env=1.0, version=staging
+    assert "$VERSION" not in result
+    assert "$ENV" not in result
+    assert "$ARGUMENTS" not in result
+
+
+def test_substitute_missing_arg():
+    # If user provides fewer args than named slots, missing ones become ""
+    result = substitute_arguments("Hello $NAME!", "", ["name"])
+    assert result == "Hello !"
+
+
+def test_substitute_no_placeholders():
+    result = substitute_arguments("just a plain prompt", "some args", [])
+    assert result == "just a plain prompt"
