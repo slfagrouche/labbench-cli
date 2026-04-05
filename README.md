@@ -31,7 +31,7 @@ Interpretation:
 ## Quick Start
 
 ```bash
-git clone <your-repo-url> labbench
+git clone https://github.com/slfagrouche/labbench.git labbench
 cd labbench
 python3 -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
