@@ -58,7 +58,7 @@ except ImportError:
     _RICH = False
     console = None
 
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 
 # ── ANSI helpers (used even with rich for non-markdown output) ─────────────
 C = {
