@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "labbench-cli"
 dynamic = ["version"]
 description = "Production-grade terminal AI assistant for Python, notebooks, and data workflows."
-readme = { file = "README.md", content-type = "text/markdown" }
+readme = { file = "PYPI_README.md", content-type = "text/markdown" }
 requires-python = ">=3.10"
 license = "Apache-2.0"
 authors = [
