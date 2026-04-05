@@ -12,7 +12,7 @@ It is intentionally compact, with practical safeguards and operational features 
 
 ## Visual Architecture
 
-### 1) End-to-end flow (for technical and non-technical readers)
+### 1) End-to-end flow
 
 ![End-to-end flow](docs/diagrams/end_to_end_flow.png)
 
@@ -27,11 +27,6 @@ Interpretation:
 ### 3) Runtime components (technical map)
 
 ![Runtime components](docs/diagrams/runtime_components.png)
-
-### Interactive Excalidraw diagrams
-
-- End-to-end architecture (interactive): [Open diagram](https://excalidraw.com/#json=bqXvrlE3dNHYn45ZRV06q,rILNOg8u_Jx2QmtCnsfyTA)
-- Permission decision flow (interactive): [Open diagram](https://excalidraw.com/#json=uS3yu8fc5PCPCYosxSyks,Ff1lRFB1H7bqQNZVt7_JdA)
 
 ## Quick Start
 
