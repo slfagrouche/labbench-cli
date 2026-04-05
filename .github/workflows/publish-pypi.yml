@@ -34,11 +34,9 @@ jobs:
   publish:
     needs: build
     runs-on: ubuntu-latest
-    environment:
-      name: pypi
-      url: https://pypi.org/p/labbench-cli
+    environment: pypi
     permissions:
-      id-token: write
+      contents: read
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v4
@@ -46,5 +44,15 @@ jobs:
           name: python-package-dist
           path: dist/
 
+      - name: Validate PyPI token is configured
+        run: |
+          if [ -z "${{ secrets.PYPI_API_TOKEN }}" ]; then
+            echo "PYPI_API_TOKEN secret is missing."
+            echo "Add it in: Settings -> Secrets and variables -> Actions -> New repository secret."
+            exit 1
+          fi
+
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
